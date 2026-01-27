@@ -1,0 +1,19 @@
+code = "buffet"
+
+dataset_dir = "dataset"
+initial_cash = 100000
+trend_threshold = 0.45
+
+train_epochs = 60
+
+[dates]
+train_start = "1990-01-01"
+train_end   = "2023-12-31"
+val_start   = "2024-07-01"
+val_end     = "2025-06-30"
+
+[ratio]
+hindsight = 0.20
+trend     = 0.40
+random    = 0.15
+other     = 0.25
