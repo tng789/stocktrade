@@ -5,9 +5,11 @@ from policies import add_technical_indicators
 from trendstrengthdetector import TrendStrengthDetector
 
 from pathlib import Path
-import sys
 
+from typing import List, Tuple          #, Callable
 import baostock as bs
+
+from datetime import datetime, timedelta
 
 tech_columns = ['close','volume','turn', 'ma5', 'ma20',
                         'bb_position', 'rsi', 'vol20', 'adx', 'plus_di',
@@ -135,6 +137,8 @@ def fetch_stocks(code:str, start_date:str, end_date:str, freq = 'd')->pd.DataFra
             adjustflag= "2"      #复权类型，默认不复权：3；1：后复权；2：前复权。 固定不变。
     )
 
+    bs.logout()
+
     if rs.error_code != '0':
         print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
         bs.logout()
@@ -156,30 +160,169 @@ def fetch_stocks(code:str, start_date:str, end_date:str, freq = 'd')->pd.DataFra
         df.sort_values(by=['date'], ascending=True, inplace=True)
 
         print("the last date of ohlcv: ", df.iloc[-1]['date'])
-    bs.logout()
     return df
 
 
-def main():
-    datafile = Path(sys.argv[1])
+def merge(df_file:str, increment_df:pd.DataFrame)->pd.DataFrame:
+    if Path(df_file).exists():
+        df = pd.read_csv(df_file, parse_dates=True)
+        df = pd.concat([df, increment_df], axis= 0).drop_duplicates()
+        df.reset_index(drop=True, inplace=True)
+    else:
+        df = increment_df.copy()
+
+    df.to_csv(df_file, index=False) 
+
+    return df
+    
+def detect_bull_markets(
+    df: pd.DataFrame,
+    min_return: float = 0.10,      # 未来 window 天涨幅阈值（如 20 天涨 10%）
+    window: int = 20,              # 涨幅观察窗口
+    min_length: int = 30,          # 牛市最短持续天数
+    max_drawdown: float = 0.15,    # 牛市中允许的最大回撤（如 15%）
+) -> List[Tuple[int, int]]:
+    """
+    检测历史数据中的牛市区间。
+    
+    返回: List[(start_index, end_index), ...]
+    - 所有索引基于 df 的行号（0-based）
+    - 区间 [start, end] 闭区间，包含端点
+    
+    改进点：
+    - 加入最大回撤约束，防止将长期震荡误判为单一牛市
+    - 确保每个牛市有明确起点和终点
+    """
+    prices = df['close'].values
+    n = len(prices)
+    if n < window + min_length:
+        return []
+    
+    bull_windows = []
+    i = 0
+    
+    while i <= n - window - 1:
+        # Step 1: 寻找潜在牛市起点（未来 window 天涨幅 ≥ min_return）
+        future_return = (prices[i + window] / prices[i]) - 1
+        if future_return >= min_return:
+            start = i
+            end = i + window
+            peak_price = prices[end]  # 当前高点
+            
+            # Step 2: 向后延伸，但监控从高点的最大回撤
+            while end < n - 1:
+                end += 1
+                current_price = prices[end]
+                
+                # 更新高点
+                if current_price > peak_price:
+                    peak_price = current_price
+                
+                # 计算当前回撤
+                drawdown = (peak_price - current_price) / peak_price
+                
+                # 若回撤超过阈值，终止当前牛市
+                if drawdown > max_drawdown:
+                    end -= 1  # 回退到最后一个有效位置
+                    break
+            
+            # Step 3: 验证牛市有效性
+            length = end - start + 1
+            total_return = (prices[end] / prices[start]) - 1
+            
+            if length >= min_length and total_return >= min_return * 0.5:
+                bull_windows.append((start, end))
+                i = end + 1  # 跳过已覆盖区域，避免重叠
+            else:
+                i += 1
+        else:
+            i += 1
+    
+    return bull_windows
+
+def is_in_bull_window(t: int, bull_windows: List[Tuple[int, int]]) -> bool:
+    """判断时间点 t 是否在任一牛市区间内"""
+    for start, end in bull_windows:
+        if start <= t <= end:
+            return True
+    return False
+
+#def main():
+#    datafile = Path(sys.argv[1])
+#    if not  datafile.exists():
+#        print(f"data file {datafile} not found...")
+#        exit(0)
+#    
+#    df = pd.read_csv(datafile, parse_dates=True)
+#
+#    # 删去成交量为零的行
+#    df = df.replace(0,np.nan).dropna()
+#    
+#    # 重置索引
+#    df.reset_index(drop=True, inplace=True)
+#    
+#    # 在原ohlcv的基础上添加技术指标
+#
+#    df_normed = get_ready(df) 
+#    df_normed.to_csv("abcd.csv")
+#
+#
+#if __name__ == "__main__":
+#    main()
+
+def update_stock_data(code:str, cfg)->None:
+
+    home_dir = Path(".") / cfg['dataset_dir'] / code
+    home_dir.mkdir(parents=True, exist_ok=True)
+
+    datafile = home_dir/f"{code}.csv"
+    indfile  = home_dir/f"{code}.ind.csv"
+    normfile = home_dir/f"{code}.norm.csv"
+
+
+    today = datetime.now().strftime("%Y-%m-%d")
     if not  datafile.exists():
-        print(f"data file {datafile} not found...")
-        exit(0)
+        df = pd.DataFrame()
+        start_date = "1999-01-01"
+    else:
+        df = pd.read_csv(datafile,parse_dates=True,skip_blank_lines=True)
+        df = df.dropna(how='all')
+
+        df['date'] = df['date'].str.replace("/","-")
+
+        last_date = df.iloc[-1]['date']
+        start_date = datetime.strptime(last_date,"%Y-%m-%d") + timedelta(days=1)
+        start_date = start_date.strftime("%Y-%m-%d")
+
+    end_date = today
+    if start_date > end_date:
+        new_transaction = pd.DataFrame()
+    else:
+        new_transaction = fetch_stocks(code, start_date, end_date)
+
+    # 如果得到新数据的ohlcv数据，继续往前，计算技术指标，归一化，以及 生成离线数据
+    days = new_transaction.shape[0]
+    if days > 0 :                   # 有新数据
+        # print(cfg)
+        if cfg['code'] == "buffet":
+            cfg['code'] = code
+            df = new_transaction.copy()
+            increment_ind, increment_normed = get_ready(df)
+        else:
+            df= pd.concat([df, new_transaction], axis=0).drop_duplicates()
+            # 重置索引
+            df.reset_index(drop=True, inplace=True)
+            increment_ind, increment_normed = get_ready(df.iloc[-(days+60):])
+     
+        # 保存实际的ohlcv数据
+        df.to_csv(datafile, index=False, date_format='%Y-%m-%d',encoding="gbk")
     
-    df = pd.read_csv(datafile, parse_dates=True)
-
-    # 删去成交量为零的行
-    df = df.replace(0,np.nan).dropna()
+        df_ind = merge(indfile, increment_ind)
+        df_normed = merge(normfile,increment_normed)
     
-    # 重置索引
-    df.reset_index(drop=True, inplace=True)
+        df_ind.to_csv(indfile)
+        df_normed.to_csv(normfile)
+
+    else:       #没有新数据
+        print("no new ohlcv data fetched")
     
-    # 在原ohlcv的基础上添加技术指标
-
-    df_normed = get_ready(df) 
-    df_normed.to_csv("abcd.csv")
-
-
-if __name__ == "__main__":
-    main()
-

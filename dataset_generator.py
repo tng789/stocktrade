@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from typing import List, Tuple          #, Callable
 from d3rlpy.dataset import MDPDataset
 
 from tqdm import tqdm
@@ -10,7 +9,15 @@ import tomli
 import tomli_w
 from pathlib import Path
 
-from data_preparation import get_ready, fetch_stocks
+from data_preparation import (
+    get_ready, 
+    fetch_stocks, 
+    merge,
+    detect_bull_markets,
+    is_in_bull_window,
+    update_stock_data
+)
+
 from gymnasium import spaces
 
 # 假设你已有这些模块（请根据实际路径调整）
@@ -23,78 +30,6 @@ from policies import (
     # add_technical_indicators
 )
 from enhancedtradingenv import EnhancedTradingEnv  # 你的环境
-
-def detect_bull_markets(
-    df: pd.DataFrame,
-    min_return: float = 0.10,      # 未来 window 天涨幅阈值（如 20 天涨 10%）
-    window: int = 20,              # 涨幅观察窗口
-    min_length: int = 30,          # 牛市最短持续天数
-    max_drawdown: float = 0.15,    # 牛市中允许的最大回撤（如 15%）
-) -> List[Tuple[int, int]]:
-    """
-    检测历史数据中的牛市区间。
-    
-    返回: List[(start_index, end_index), ...]
-    - 所有索引基于 df 的行号（0-based）
-    - 区间 [start, end] 闭区间，包含端点
-    
-    改进点：
-    - 加入最大回撤约束，防止将长期震荡误判为单一牛市
-    - 确保每个牛市有明确起点和终点
-    """
-    prices = df['close'].values
-    n = len(prices)
-    if n < window + min_length:
-        return []
-    
-    bull_windows = []
-    i = 0
-    
-    while i <= n - window - 1:
-        # Step 1: 寻找潜在牛市起点（未来 window 天涨幅 ≥ min_return）
-        future_return = (prices[i + window] / prices[i]) - 1
-        if future_return >= min_return:
-            start = i
-            end = i + window
-            peak_price = prices[end]  # 当前高点
-            
-            # Step 2: 向后延伸，但监控从高点的最大回撤
-            while end < n - 1:
-                end += 1
-                current_price = prices[end]
-                
-                # 更新高点
-                if current_price > peak_price:
-                    peak_price = current_price
-                
-                # 计算当前回撤
-                drawdown = (peak_price - current_price) / peak_price
-                
-                # 若回撤超过阈值，终止当前牛市
-                if drawdown > max_drawdown:
-                    end -= 1  # 回退到最后一个有效位置
-                    break
-            
-            # Step 3: 验证牛市有效性
-            length = end - start + 1
-            total_return = (prices[end] / prices[start]) - 1
-            
-            if length >= min_length and total_return >= min_return * 0.5:
-                bull_windows.append((start, end))
-                i = end + 1  # 跳过已覆盖区域，避免重叠
-            else:
-                i += 1
-        else:
-            i += 1
-    
-    return bull_windows
-
-def is_in_bull_window(t: int, bull_windows: List[Tuple[int, int]]) -> bool:
-    """判断时间点 t 是否在任一牛市区间内"""
-    for start, end in bull_windows:
-        if start <= t <= end:
-            return True
-    return False
 
 
 def generate_trading_dataset(
@@ -270,15 +205,20 @@ def generate_trading_dataset(
     
     return dataset
 
-def make_val_df(df:pd.DataFrame, start_date, end_date, data_dir):
-    code = df.iloc[0]['code']
+def make_val_df(code:str, cfg)->None:
+
     # start_timestamp = datetime.strptime(start_date, "%Y-%m-%d")
     # end_timestamp = datetime.strptime(end_date, "%Y-%m-%d")
-    start_date_n = int(df[df['date'] >= start_date].index[0])
-    end_date_n = int(df[df['date'] <= end_date].index[-1])
+    home_dir  = Path(".") / cfg['data_dir'] / code 
+    normfile = home_dir /f"{code}.norm.csv"
+    df = pd.read_csv(normfile)
 
-    val_data = df.iloc[start_date_n-59:end_date_n,:]
-    val_data.to_csv(Path(data_dir)/code/f"{code}.val.csv",index=False) 
+    start_date_n = int(df[df['date'] >= cfg['dates']['train_start']].index[0])
+    end_date_n = int(df[df['date'] <= cfg['dates']['train_end']].index[-1])
+
+    start_date_n =max(start_date_n-59, 0)
+    val_data = df.iloc[start_date_n:end_date_n+1,:]
+    val_data.to_csv(home_dir/f"{code}.val.csv",index=False) 
 
     #total_days = val_data.shape[0]
     
@@ -291,18 +231,6 @@ def make_val_df(df:pd.DataFrame, start_date, end_date, data_dir):
     #        df_period = val_data.iloc[i:i+90]
     #    df_period.to_csv(Path(data_dir)/code/f"{code}.val.{i:02d}.csv",index=False)
     #    i += 15
-    
-def merge(df_file:str, increment_df:pd.DataFrame)->pd.DataFrame:
-    if Path(df_file).exists():
-        df = pd.read_csv(df_file, parse_dates=True)
-        df = pd.concat([df, increment_df], axis= 0).drop_duplicates()
-        df.reset_index(drop=True, inplace=True)
-    else:
-        df = increment_df.copy()
-
-    df.to_csv(df_file, index=False) 
-
-    return df
     
 def parse_opt():
     parser = argparse.ArgumentParser()
@@ -329,72 +257,9 @@ if __name__ == "__main__":
     with open(cfg_path,"rb") as f:
         cfg = tomli.load(f)
 
-    home_dir = Path(".") / cfg['dataset_dir'] / code
-    home_dir.mkdir(parents=True, exist_ok=True)
-
-    datafile = home_dir/f"{code}.csv"
-    indfile  = home_dir/f"{code}.ind.csv"
-    normfile = home_dir/f"{code}.norm.csv"
-
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    if not  datafile.exists():
-        df = pd.DataFrame()
-        start_date = "1999-01-01"
-    else:
-        df = pd.read_csv(datafile,parse_dates=True,skip_blank_lines=True)
-        df = df.dropna(how='all')
-
-        df['date'] = df['date'].str.replace("/","-")
-
-        last_date = df.iloc[-1]['date']
-        start_date = datetime.strptime(last_date,"%Y-%m-%d") + timedelta(days=1)
-        start_date = start_date.strftime("%Y-%m-%d")
-
-    end_date = today
-    if start_date > end_date:
-        new_transaction = pd.DataFrame()
-    else:
-        new_transaction = fetch_stocks(code, start_date, end_date)
-
-    # 如果得到新数据的ohlcv数据，继续往前，计算技术指标，归一化，以及 生成离线数据
-    days = new_transaction.shape[0]
-    if days > 0 :                   # 有新数据
-        # print(cfg)
-        if cfg['code'] == "buffet":
-            cfg['code'] = code
-            df = new_transaction.copy()
-            increment_ind, increment_normed = get_ready(df)
-        else:
-            df= pd.concat([df, new_transaction], axis=0).drop_duplicates()
-            # 重置索引
-            df.reset_index(drop=True, inplace=True)
-            increment_ind, increment_normed = get_ready(df.iloc[-(days+60):])
-     
-        # 保存实际的ohlcv数据
-        df.to_csv(datafile, index=False, date_format='%Y-%m-%d',encoding="gbk")
+    update_stock_data(code, cfg)
     
-        # 划分测试集和验证集
-        # df_test = df[df.index >=]
-        # df_test.to_csv(f"{code}_test.csv")
-    
-        # df_val = df.loc[f"{cfg['dates']['val_start']}":f"{cfg['dates']['val_end']}"]
-    
-        # data_file_val = home_dir / f"{code}_val.csv"
-        # df_val.to_csv(data_file_val)
-    
-        # 取得归一化的数据集（全部数据，含训练验证测试）
-        # 窗口 至少60天
-        
-        # 保存到csv
-        df_ind = merge(indfile, increment_ind)
-        df_normed = merge(normfile,increment_normed)
-    
-        # 为分阶段保存准备，暂时不用
-        make_val_df(df_normed,cfg['dates']['val_start'],cfg['dates']['val_end'],cfg['dataset_dir'])
-
-    else:       #没有新数据
-        print("no new ohlcv data fetched")
+    make_val_df(code, cfg)
 
     go_ahead = opt.yes
     if not go_ahead:
@@ -412,6 +277,10 @@ if __name__ == "__main__":
     if go_ahead:
         print("continue to generate mock transaction data")
         # 按照策略生成模拟交易数据集 保存
+        home_dir  = Path(".") / cfg['data_dir'] / code 
+        indfile = home_dir /f"{code}.ind.csv"
+        normfile = home_dir /f"{code}.norm.csv"
+        
         if indfile.exists() and normfile.exists():
             df_ind = pd.read_csv(indfile, parse_dates=True)
             df_normed = pd.read_csv(normfile, parse_dates=True)
@@ -431,13 +300,13 @@ if __name__ == "__main__":
             )
     
             # 保存
-            code = opt.code
+            # code = opt.code
             h5_file = home_dir/f"{code}_train_dataset.h5"
             dataset.dump(h5_file)
         else:
             print("either tech indicators or normilized file exists")
 
-    cfg['last_update'] = today
+    cfg['last_update'] = datetime.now().strftime("%Y-%m-%d")
     with open(f"{code}.toml","wb") as f:
         tomli_w.dump(cfg, f)
      
