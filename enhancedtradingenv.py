@@ -40,7 +40,7 @@ class EnhancedTradingEnv():
         self.price_series = np.array(df['CLOSE'], dtype=np.float64)
 
         self.T = len(self.price_series)
-        if self.T <= window_size:
+        if self.T < window_size:
             raise ValueError("price_series too short for window_size")
         
         self.initial_cash = float(initial_cash)

@@ -137,13 +137,12 @@ def fetch_stocks(code:str, start_date:str, end_date:str, freq = 'd')->pd.DataFra
             adjustflag= "2"      #复权类型，默认不复权：3；1：后复权；2：前复权。 固定不变。
     )
 
-    bs.logout()
-
     if rs.error_code != '0':
         print('query_history_k_data_plus respond  error_msg:'+rs.error_msg)
         bs.logout()
         return empty_df
 
+    print("data feteched from baostock")
     data_list = []
     while rs.next():
         # 获取一条记录，将记录合并在一起
@@ -160,6 +159,8 @@ def fetch_stocks(code:str, start_date:str, end_date:str, freq = 'd')->pd.DataFra
         df.sort_values(by=['date'], ascending=True, inplace=True)
 
         print("the last date of ohlcv: ", df.iloc[-1]['date'])
+
+    bs.logout()
     return df
 
 
@@ -320,8 +321,8 @@ def update_stock_data(code:str, cfg)->None:
         df_ind = merge(indfile, increment_ind)
         df_normed = merge(normfile,increment_normed)
     
-        df_ind.to_csv(indfile)
-        df_normed.to_csv(normfile)
+        df_ind.to_csv(indfile, index=False)
+        df_normed.to_csv(normfile, index=False)
 
     else:       #没有新数据
         print("no new ohlcv data fetched")

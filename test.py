@@ -246,11 +246,7 @@ if __name__ ==  "__main__":
 
     env_kwargs = {
         "initial_cash": 100000,
-        "commission_buy": 0.0003,
-        "commission_sell": 0.0013,
         "rebalance_band": 0.2,
-        # "take_profit_pct": 1.0,
-        # "stop_loss_pct": 1.0,
         "window_size": 60
     }   
 
@@ -266,7 +262,7 @@ if __name__ ==  "__main__":
             print(f"🛠️  装入模型 {model_name}")
             cql = d3rlpy.load_learnable(model,device='cuda:0')
 
-            info = financial_evaluator(env, cql, df.shape[0],pace = opt.pace)               #第三个参数待优化
+            info = financial_evaluator(env, cql, df.shape[0],pace = opt.pace)               #pace不用，=1，不要动，
             # for k,v in info.items():
                 # print(k, v)
 

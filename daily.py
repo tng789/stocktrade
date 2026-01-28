@@ -5,13 +5,15 @@ import d3rlpy
 
 from test import financial_evaluator
 from enhancedtradingenv import EnhancedTradingEnv
-from datetiem import datetime
+from datetime import datetime
 from pathlib import Path
 
+import re
+import tomli
 def update_predictions(df, home_dir):
     df_prediction = pd.read_csv(home_dir / f"{code}.prediction.csv")
 
-    df = df[df['date', 'code', 'open','close', 'high','low','position','total_value','cash']]
+    df = df[df['date', 'code', 'open','CLOSE', 'high','low','position','total_value','cash']]
     df_prediction = pd.concat([df_prediction, df]).drop_duplicates()
     df_prediction.to_csv(home_dir / f"{code}.prediction.csv", index= False)
 
@@ -21,7 +23,7 @@ if __name__ == "__main__":
     master_list_file = Path(".") / "dataset" / "master_list.txt"
 
     if not master_list_file.exists():
-        print("stock master list not existing, quitted.")
+        print("stock master list not existing, quited.")
         exit() 
     
     master_list = []
@@ -31,16 +33,26 @@ if __name__ == "__main__":
 
     # 股票代码列表，也是模型列表
     for line in master_list:
-        code, model = line.split(" ")
+        print(f"{line=}")
+        code, model = re.sub(r'\s+', ' ', line).split(" ")
+        print(f"{code=} {model=}")
+
+        cfg_path = Path(".") /f"{code}.toml"
+        with open(cfg_path,"rb") as f:
+            cfg = tomli.load(f)
+
         home_dir = Path(".") / "dataset" / f"{code}" 
-        update_stock_data(code)
+        update_stock_data(code, cfg)
         
-        df_norm = pd.read(Path(".")/"dataset"/f"{code}.norm.csv")
-        if df_norm.shape[0] < 60 or df_norm.iloc[-1]['date'] != today:
+        df_norm = pd.read_csv(home_dir /f"{code}.norm.csv")
+        dataset_size = df_norm.shape[0]
+
+        if dataset_size < 60 or df_norm.iloc[-1]['date'] != today:
             continue
 
-        df_test = df_norm.iloc[-60:] 
-
+        df_test = df_norm.iloc[dataset_size-60:] 
+        print(df_test.shape)
+        
         env_kwargs = {
             "initial_cash": 100000,
             "rebalance_band": 0.2,
@@ -53,6 +65,7 @@ if __name__ == "__main__":
         cql = d3rlpy.load_learnable(algo,device='cuda:0')
 
         info, result_df = financial_evaluator(env, cql, in_batch=False)
+        print(result_df)
 
         update_predictions(result_df, code, home_dir)
     
