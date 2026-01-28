@@ -185,7 +185,17 @@ def financial_evaluator(env, algo, in_batch = True, pace = 1):
     return info if in_batch else (info, df)
     
 
-def make_test_dataset(df:pd.DataFrame, start_date:str, end_date:str)->pd.DataFrame:
+def make_test_dataset(code, start_date:str, end_date:str)->pd.DataFrame:
+    
+    home_dir = Path(".") /'dataset'/f"{code}"
+    df_norm = pd.read_csv(home_dir / f"{code}.norm.csv", parse_dates=True)
+    
+    end_date_dataset = df_norm.iloc[-1]['date']
+    if end_date is None:                    #命令行未提供的话，去库里最后一天
+        end_date = end_date_dataset
+    else:                                       # 否则，取 提供的和库中最后一天 两者中小的
+        end_date = min(opt.end_date,end_date_dataset)
+
     
     raw_data = df[df['date']>=start_date]
     raw_data = raw_data[raw_data['date']<=end_date]
@@ -226,18 +236,11 @@ def parse_opt():
 
 if __name__ ==  "__main__":
     opt = parse_opt()
+    code = opt.code
 
-    home_dir = Path(".") /'dataset'/f"{opt.code}"
+
     print("🛠️  创建测试环境...")
-    df_norm = pd.read_csv(home_dir / f"{opt.code}.norm.csv", parse_dates=True)
-    
-    end_date_dataset = df_norm.iloc[-1]['date']
-    if opt.end_date is None:                    #命令行未提供的话，去库里最后一天
-        end_date = end_date_dataset
-    else:                                       # 否则，取 提供的和库中最后一天 两者中小的
-        end_date = min(opt.end_date,end_date_dataset)
-
-    df = make_test_dataset(df_norm,opt.start_date,end_date)
+    df = make_test_dataset(code,opt.start_date,opt.end_date)
 
     print(f"从 {df.iloc[0]['date']} 到 {df.iloc[-1]['date']}，总共{df.shape[0]} 天")
 
@@ -253,6 +256,7 @@ if __name__ ==  "__main__":
 
     env =  EnhancedTradingEnv(df=df,mode="predict",**env_kwargs)
 
+    home_dir = Path(".")/"dataset" / f"{code}.norm.csv"
     if opt.model is None:       # 推理
         models = sorted(list(home_dir.glob("*.d3")))
         
