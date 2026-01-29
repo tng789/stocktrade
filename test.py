@@ -119,8 +119,8 @@ def financial_evaluator(env, algo, in_batch = True, pace = 1):
         position.append(env.position)
         cash.append(env.cash)
         total_values.append(info["total_value"])
-        if done:
-            break
+        # if done:
+            # break
     
         env.fforward(pace-1)                #env.step已经走了一步
 
@@ -134,6 +134,7 @@ def financial_evaluator(env, algo, in_batch = True, pace = 1):
         df['raw_actions']      = update(raws,window=60,pace=pace)
         df['cash']         = update(cash,window=60,pace=pace)
         df['position']     = update(position,window=60,pace=pace)
+
 
     total_values = np.array(total_values)
     returns = np.diff(total_values) / total_values[:-1]
@@ -182,6 +183,8 @@ def financial_evaluator(env, algo, in_batch = True, pace = 1):
         "alpha_over_bh": float(alpha_over_bh)
     }
 
+    print(f"{in_batch=}")
+    print(info, df)
     return info if in_batch else (info, df)
     
 

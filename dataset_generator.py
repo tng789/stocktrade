@@ -209,7 +209,7 @@ def make_val_df(code:str, cfg)->None:
 
     # start_timestamp = datetime.strptime(start_date, "%Y-%m-%d")
     # end_timestamp = datetime.strptime(end_date, "%Y-%m-%d")
-    home_dir  = Path(".") / cfg['data_dir'] / code 
+    home_dir  = Path(".") / cfg['dataset_dir'] / code 
     normfile = home_dir /f"{code}.norm.csv"
     df = pd.read_csv(normfile)
 
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     if go_ahead:
         print("continue to generate mock transaction data")
         # 按照策略生成模拟交易数据集 保存
-        home_dir  = Path(".") / cfg['data_dir'] / code 
+        home_dir  = Path(".") / cfg['dataset_dir'] / code 
         indfile = home_dir /f"{code}.ind.csv"
         normfile = home_dir /f"{code}.norm.csv"
         

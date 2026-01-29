@@ -11,18 +11,19 @@ class EnhancedTradingEnv():
         self,
         df,
         mode,                       # train for offline data generation, predict for validation and test...
-        initial_cash=100000,      # 初始资金
-        commission_buy=0.0003,       # 买入佣金（如万3）
-        commission_sell=0.0013,      # 卖出佣金（万3 + 印花税0.1%）
-        slippage_bp=2,               # 滑点（2 bp = 0.02%）
-        max_weight=1.0,            # 最大仓位比例（1.0 = 100%）
-        window_size=60,              # 状态中包含过去多少根K线
+        initial_cash=100000,        # 初始资金
+        # position = 0,               # 初始的股票数量
+        commission_buy=0.0003,      # 买入佣金（如万3）
+        commission_sell=0.0013,     # 卖出佣金（万3 + 印花税0.1%）
+        slippage_bp=2,              # 滑点（2 bp = 0.02%）
+        max_weight=1.0,             # 最大仓位比例（1.0 = 100%）    #该参数废弃
+        window_size=60,             # 状态中包含过去多少根K线
         rebalance_band=0.2,         # 再平衡带宽（如 ±5%）  加到20，减少交易,相比10%似乎效果更好
-        # take_profit_pct=1.0,        # 止盈线（25%）
-        # stop_loss_pct=1.0,          # 止损线（25%）
-        # enable_tplus1=False,          # 是否启用 T+1 限制
+        # take_profit_pct=1.0,      # 止盈线（25%）
+        # stop_loss_pct=1.0,        # 止损线（25%）
+        # enable_tplus1=False,      # 是否启用 T+1 限制
         trend_threshold = 0.45, 
-        lot_size=100                 # A股最小交易单位（1手=100股）
+        lot_size=100                # A股最小交易单位（1手=100股）
     ):
         # self.price_series = np.array(price_series, dtype=np.float64)
         # super(EnhancedTradingEnv, self).__init__()
@@ -56,7 +57,7 @@ class EnhancedTradingEnv():
         self.lot_size = lot_size
         
         self._state_shape = None  # 新增：缓存状态形状
-
+        # self.position = position
         self.trend_threshold = trend_threshold
         self.trend_score = 0
         self.trend_detector = TrendStrengthDetector(lookback=window_size)
