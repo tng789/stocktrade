@@ -11,7 +11,6 @@ from pathlib import Path
 import re
 import tomli
 
-from collections import defaultdict
 
 window_size = 60
 days_in_a_year = 250
@@ -134,75 +133,121 @@ def update_results(df_result:pd.DataFrame, today:str, info:dict):
 if __name__ == "__main__":
     today:str = datetime.now().strftime("%Y-%m-%d")
 
-    master_list_file = Path(".") / "dataset" / "master_list.txt"
-
-    if not master_list_file.exists():
-        print("stock master list not existing, quited.")
-        exit() 
+    # 读取已处理的股票列表，
+    # 读取用户列表，文件在dataset目录下，文件名 users.txt，格式：
+    # 名称 代码1 代码2 代码3 代码4
     
-    master_list = []
-    with open(master_list_file, 'rt', encoding='utf-8') as f:
-        # 去除每行末尾的换行符
-        master_list =  [line.rstrip('\n') for line in f if line.strip()]
+    dataset_home_dir = Path(".") /'dataset'
 
-    # 股票代码列表，也是模型列表
-    for line in master_list:
-        # print(f"{line=}")
-        code, model = re.sub(r'\s+', ' ', line).split(" ")
-        # print(f"{code=} {model=}")
-
-        # 读取配置文件
+    users_file = Path(".") / "predictions" / "users.txt"
+    models_file = dataset_home_dir / "models.csv"
+    if not users_file.exists():         # or not models_file.exists():
+        print("master list not existing, quited.")
+        exit()
+    
+    #-------------------------------
+    # 按照模型列表更新OHLCV数据
+    #-------------------------------
+    df_models = pd.read_csv(models_file)       # 模型列表,格式，code, model_name
+    codes = df_models['code'].tolist()
+    for code in codes:
+        # 根据toml文件来生成数据， toml文件应该放在dataset下面，每个股票一个目录，toml在那里。要改动。后续是不是全进数据库，再议论
         cfg_path = Path(".") /f"{code}.toml"
         with open(cfg_path,"rb") as f:
             cfg = tomli.load(f)
-
-        home_dir = Path(".") / "dataset" / f"{code}" 
-        result_file = home_dir / f'{code}.predicts.csv'
-        
         # 更新数据
         update_stock_data(code, cfg)
-        
-        # 读取基础数据，不含技术指标，作为最后的展示给用户的数据
-        bs_data = pd.read_csv(home_dir / f"{code}.csv",parse_dates=True)
 
-        if not result_file.exists():    # 第一次运行，没有结果文件
-            df_result = bs_data[bs_data['date'] ==today ]
-        else:                           # 运行过，有结果文件
-            df_result = pd.read_csv(result_file,parse_dates=True)
-                                    
-        # 准备推理所需数据
-        df_norm = pd.read_csv(home_dir /f"{code}.norm.csv")
-        dataset_size = df_norm.shape[0]
 
-        # 数据集必须大于隶属数据窗口，60天， 且，本脚本在每日收盘数据就绪后才能运行
-        if dataset_size < window_size :         #or df_norm.iloc[-1]['date'] != today:
-            continue
-
-        df_test = df_norm.iloc[dataset_size-60:] 
-        
-        env_kwargs = {
-            "initial_cash": 100000,
-            "rebalance_band": 0.2,
-            "window_size": 60
-        }   
-
-        env =  EnhancedTradingEnv(df=df_test,mode="predict",**env_kwargs)
-
-        # 加载模型
-        cql_file = home_dir / model 
-        cql = d3rlpy.load_learnable(cql_file, device='cuda:0')
-
-        # 做出预测，并按预测操作
-        info = evaluator(env, cql)
-        df_result = update_results(df_result, today, info)
-
-        # 计算金融指标
-        info = finance_results(df_result)
-        df_result = update_results(df_result, today, info)
-
-        # 保存结果
-        df_result.to_csv(result_file, index=False)
-        # df_result = None
+    #-------------------------------
+    # 按照用户列表的模型进行预测
+    #-------------------------------
+    with open(users_file, 'rt', encoding='utf-8') as f:
+        # 读取用户列表
+        user_master_list = [line.rstrip('\n') for line in f if line.strip()]
     
+    for user in user_master_list:
+        name, *stocks = re.sub(r'\s+', ' ', user).split(" ")       
+    
+        user_home_dir   = Path(".") / 'predictions' / name
+        if not user_home_dir.exists():
+            user_home_dir.mkdir(parents=True)
+
+        for code in stocks:
+            trade_history = user_home_dir / f"{code}.csv"
+            
+            # 取历史交易记录，供env使用
+            if not trade_history.exists():      # 没有交易记录,则取默认值，或者临时输入的值
+                cash = 100000   
+                position = 0 
+                total_value = 100000
+                rebalance_band = 0.2
+            else:                               # 有交易记录,则取出上一次的数值
+                df = pd.read_csv(trade_history)
+                cash = df.iloc[-1]['cash']
+                position = df.iloc[-1]['position']
+                total_value = df.iloc[-1]['total_value']
+                rebalance_band = df.iloc[-1]['rebalance_band']
+
+            # 读取基础数据，不含技术指标，作为最后的展示给用户的数据
+            bs_data = pd.read_csv(dataset_home_dir /code/f"{code}.csv",parse_dates=True)
+
+            result_file = user_home_dir / f'{code}.transactions.csv'
+            if not result_file.exists():    # 第一次运行，没有结果文件
+                df_result = bs_data[bs_data['date'] ==today ]
+            else:                           # 运行过，有结果文件
+                df_result = pd.read_csv(result_file,parse_dates=True)
+        
+            # 准备推理所需数据
+            df_norm = pd.read_csv(dataset_home_dir /code/f"{code}.norm.csv")
+            dataset_size = df_norm.shape[0]
+
+            # 数据集必须大于历史数据窗口，60天， 且，本脚本在每日收盘数据就绪后才能运行
+            if dataset_size < window_size :         #or df_norm.iloc[-1]['date'] != today:
+                continue
+
+            df_test = df_norm.iloc[dataset_size-60:]            
+            
+            env_kwargs = {
+                "initial_cash": cash,
+                "rebalance_band": rebalance_band,
+                "position": position,
+                # "window_size": 60
+            }   
+
+            env =  EnhancedTradingEnv(df=df_test,mode="predict",**env_kwargs)
+            # 加载模型
+            model = df_models.loc[df_models['code']==code, 'model'].iloc[0]
+            print(f"{code=}     {df_models=}")
+            
+            print(f"{type(model)=}")
+
+            cql_file = dataset_home_dir / code / model 
+            print(f"{cql_file=}")
+            cql = d3rlpy.load_learnable(cql_file, device='cuda:0')
+
+            # 做出预测，并按预测操作
+            info = evaluator(env, cql)
+            df_result = update_results(df_result, today, info)
+
+            # 计算金融指标
+            info = finance_results(df_result)
+            df_result = update_results(df_result, today, info)
+
+            # 保存结果
+            df_result.to_csv(result_file, index=False)
+            
+            
+            #get user preference
+            # make environment
+            # load model
+            # predict
+            # save result
+            # calculate finance result
+            # save result
+
+
+
+
 
     

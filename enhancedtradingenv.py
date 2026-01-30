@@ -12,7 +12,7 @@ class EnhancedTradingEnv():
         df,
         mode,                       # train for offline data generation, predict for validation and test...
         initial_cash=100000,        # 初始资金
-        # position = 0,               # 初始的股票数量
+        position = 0,               # 初始的股票数量
         commission_buy=0.0003,      # 买入佣金（如万3）
         commission_sell=0.0013,     # 卖出佣金（万3 + 印花税0.1%）
         slippage_bp=2,              # 滑点（2 bp = 0.02%）
@@ -57,14 +57,14 @@ class EnhancedTradingEnv():
         self.lot_size = lot_size
         
         self._state_shape = None  # 新增：缓存状态形状
-        # self.position = position
+        self.position = position
         self.trend_threshold = trend_threshold
         self.trend_score = 0
         self.trend_detector = TrendStrengthDetector(lookback=window_size)
 
         self.action_space = spaces.Box(low=0.0, high=1.0, shape=(1,), dtype=np.float64)
 
-        returns = df['CLOSE'].pct_change().dropna() * initial_cash
+        returns = df['CLOSE'].pct_change().dropna() * initial_cash                          # returns 和 returns_scale 若用不上则删除
         self.return_scale = np.std(returns) if len(returns) > 0 else initial_cash * 0.001
         # 状态维度：
         # - (close price, volume, turn) × window_size
@@ -82,7 +82,7 @@ class EnhancedTradingEnv():
         # self.T = len(feature_matrix)
         # self.reset()
 
-    def reset(self, start_idx=0, data_length=250):               # episode length 250 用于模拟数据生成
+    def reset(self, start_idx=0, position=0, data_length=250):               # episode length 250 用于模拟数据生成
         """重置环境，可指定起始时间"""
         
         self.T = data_length
@@ -131,6 +131,7 @@ class EnhancedTradingEnv():
         # 拉平
         flattened =  data_in_np.flatten()
         total_value = self.cash + self.position * self.price_series[self.t]                 # 总价值，现金+position*昨天的价格？
+        # 这里为什么是除以最初的资金？不应该是当前的净值吗？除以intial_cash好像也行？
         account_info = np.array([
             self.cash / self.initial_cash,
             (self.position * self.price_series[self.t]) / self.initial_cash,
@@ -173,6 +174,7 @@ class EnhancedTradingEnv():
         if self.df.iloc[self.t]['trend'] < self.trend_threshold:             # 趋势阈值暂定0.45
             #do not TRADE
             # delta = 0                         #用零表示不交易，训练时趋势不限制交易，而在推理时才限制。
+            # 这两个在后面也没有用上
             position_bonus = 0.1 * target_weight
         else:
             position_bonus = -0.2 * target_weight
@@ -261,7 +263,9 @@ class EnhancedTradingEnv():
         # total_value_today = self.cash + self.position * current_price
         assert self.position >= 0, "Position cannot be less than 0" 
             
-        # —————— 10. 计算奖励（对数收益） ——————
+        # ——————--------------------------- 
+        # 计算奖励                    ——————
+        # ---------------------------------
         total_value_today = self.cash + (self.position * current_price)                 # if not terminated_by_condition else 0)
         self.total_value = total_value_today
 

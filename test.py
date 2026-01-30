@@ -73,7 +73,7 @@ def financial_evaluator(env, algo, in_batch = True, pace = 1):
     在给定 env 上运行策略，返回金融指标
     """
     days_for_test = env.df.shape[0]
-    obs = env.reset(start_idx=0, data_length=days_for_test)
+    obs = env.reset(start_idx=0, position=0, data_length=days_for_test)
 
     total_values = []
     actions = []
@@ -200,7 +200,7 @@ def make_test_dataset(code, start_date:str, end_date:str)->pd.DataFrame:
         end_date = min(opt.end_date,end_date_dataset)
 
     
-    raw_data = df[df['date']>=start_date]
+    raw_data = df_norm[df_norm['date']>=start_date]
     raw_data = raw_data[raw_data['date']<=end_date]
     
     first_date = raw_data.iloc[0]['date']
@@ -214,7 +214,7 @@ def make_test_dataset(code, start_date:str, end_date:str)->pd.DataFrame:
     start = num - window_size + 1
     end   = num + raw_data.shape[0]
 
-    test_dataset = df.iloc[start:end]
+    test_dataset = df_norm.iloc[start:end]
     test_dataset.reset_index(drop=True, inplace=True)
 
     return test_dataset
@@ -255,7 +255,7 @@ if __name__ ==  "__main__":
 
     env =  EnhancedTradingEnv(df=df,mode="predict",**env_kwargs)
 
-    home_dir = Path(".")/"dataset" / f"{code}.norm.csv"
+    home_dir = Path(".")/"dataset" / f"{code}"
     if opt.model is None:       # 推理
         models = sorted(list(home_dir.glob("*.d3")))
         
